@@ -8,21 +8,16 @@ import numpy as np
 from pathlib import Path
 import torch
 from onpolicy.config import get_config
-from onpolicy.envs.mpe.MPE_env import MPEEnv
-from onpolicy.envs.env_wrappers import SubprocVecEnv, DummyVecEnv
+from onpolicy.envs.uav.env import CommunicationEnv
+from onpolicy.envs.env_wrappers import ShareSubprocVecEnv, SubprocVecEnv, DummyVecEnv
 
 
-"""Train script for MPEs."""
+"""Train script for UAVs."""
 
 def make_train_env(all_args):
     def get_env_fn(rank):
         def init_env():
-            if all_args.env_name == "MPE":
-                env = MPEEnv(all_args,rank)
-            else:
-                print("Can not support the " +
-                      all_args.env_name + "environment.")
-                raise NotImplementedError
+            env = CommunicationEnv(all_args)
             env.seed(all_args.seed + rank * 1000)
             return env
         return init_env
@@ -35,29 +30,25 @@ def make_train_env(all_args):
 def make_eval_env(all_args):
     def get_env_fn(rank):
         def init_env():
-            if all_args.env_name == "MPE":
-                env = MPEEnv(all_args)
-            else:
-                print("Can not support the " +
-                      all_args.env_name + "environment.")
-                raise NotImplementedError
+            env = CommunicationEnv(all_args)
             env.seed(all_args.seed * 50000 + rank * 10000)
             return env
         return init_env
-    if all_args.n_eval_rollout_threads == 1:
+    if all_args.n_rollout_threads == 1:
         return DummyVecEnv([get_env_fn(0)])
     else:
-        return SubprocVecEnv([get_env_fn(i) for i in range(all_args.n_eval_rollout_threads)])
+        return SubprocVecEnv([get_env_fn(i) for i in range(all_args.n_rollout_threads)])
 
 
 def parse_args(args, parser):
     parser.add_argument('--scenario_name', type=str,
                         default='simple_spread', help="Which scenario to run on")
-    parser.add_argument("--num_landmarks", type=int, default=3)
+    parser.add_argument('--num_uavs', type=int,
+                        default=5, help="number of uavs")
     parser.add_argument('--num_agents', type=int,
-                        default=2, help="number of players")
+                        default=2, help="number of executors")
     parser.add_argument('--controller_num_agents', type=int,
-                        default=1, help="number of players")
+                        default=1, help="number of controllers")
     parser.add_argument('--ctl_num_mini_batch', type=int,
                         default=10, help="number of players")
     parser.add_argument('--exe_num_mini_batch', type=int,
@@ -102,8 +93,8 @@ def main(args):
 
     if all_args.algorithm_name == "rmappo":
         assert (all_args.use_recurrent_policy or all_args.use_naive_recurrent_policy), ("check recurrent policy!")
-    elif all_args.algorithm_name == "mappo":
-        assert (all_args.use_recurrent_policy == False and all_args.use_naive_recurrent_policy == False), ("check recurrent policy!")
+    # elif all_args.algorithm_name == "mappo":
+    #     assert (all_args.use_recurrent_policy == False and all_args.use_naive_recurrent_policy == False), ("check recurrent policy!")
     else:
         raise NotImplementedError
 
@@ -133,7 +124,7 @@ def main(args):
     # wandb
     if all_args.use_wandb:
         run = wandb.init(config=all_args,
-                         project='mpe',
+                         project='uav',
                          entity=all_args.wandb_name,
                          notes=socket.gethostname(),
                          name=str(all_args.algorithm_name) + "_" +
@@ -166,6 +157,7 @@ def main(args):
 
     # env init
     envs = make_train_env(all_args)
+    print(">>> Env wrapper class:", type(envs))
     eval_envs = make_eval_env(all_args) if all_args.use_eval else None
     num_agents = all_args.num_agents
 
@@ -179,6 +171,7 @@ def main(args):
     }
 
     # run experiments
+    """
     if all_args.share_policy:
         if all_args.use_macro:
             from onpolicy.runner.shared.mpe_hrunner import MPEHRunner as Runner
@@ -186,6 +179,9 @@ def main(args):
             from onpolicy.runner.shared.mpe_runner import MPERunner as Runner
     else:
         from onpolicy.runner.separated.mpe_runner import MPERunner as Runner
+    """
+
+    from onpolicy.runner.shared.uav_hrunner import UAVHRunner as Runner
 
     runner = Runner(config)
     runner.run()

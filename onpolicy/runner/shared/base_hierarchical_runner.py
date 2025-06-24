@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from tensorboardX import SummaryWriter
 import math
+import copy
 
 # from ...transmit import Client
 from onpolicy.utils.shared_buffer import SharedReplayBuffer
@@ -138,6 +139,11 @@ class HRunner(object):
         self.controller_algo_module = Policy(self.all_args, self.envs.ctl_observation_space[0],
                                                  self.envs.ctl_share_observation_space[0],
                                                  self.envs.ctl_action_space[0], use_macro=True ,device=self.device)
+
+
+        exe_args = copy.deepcopy(self.all_args)
+        exe_args.use_gnn = exe_args.use_exe_gnn
+        # print(f"[DEBUG] exe_args.use_gnn      = {exe_args.use_gnn}")
 
         self.executor_algo_module = Policy(self.all_args, self.envs.exe_observation_space[0],
                                                self.envs.exe_share_observation_space[0],

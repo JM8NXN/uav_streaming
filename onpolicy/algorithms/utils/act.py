@@ -1,6 +1,7 @@
 from .distributions import Bernoulli, Categorical, DiagGaussian
 import torch
 import torch.nn as nn
+import numpy as np
 
 class ACTLayer(nn.Module):
     """
@@ -14,7 +15,6 @@ class ACTLayer(nn.Module):
         super(ACTLayer, self).__init__()
         self.mixed_action = False
         self.multi_discrete = False
-
         if action_space.__class__.__name__ == "Discrete":
             action_dim = action_space.n
             self.action_out = Categorical(inputs_dim, action_dim, use_orthogonal, gain)
@@ -26,7 +26,8 @@ class ACTLayer(nn.Module):
             self.action_out = Bernoulli(inputs_dim, action_dim, use_orthogonal, gain)
         elif action_space.__class__.__name__ == "MultiDiscrete":
             self.multi_discrete = True
-            action_dims = action_space.high - action_space.low + 1
+            # action_dims = action_space.high - action_space.low + 1
+            action_dims = action_space.nvec
             self.action_outs = []
             for action_dim in action_dims:
                 self.action_outs.append(Categorical(inputs_dim, action_dim, use_orthogonal, gain))
@@ -61,22 +62,37 @@ class ACTLayer(nn.Module):
 
             actions = torch.cat(actions, -1)
             action_log_probs = torch.sum(torch.cat(action_log_probs, -1), -1, keepdim=True)
-
         elif self.multi_discrete:
             actions = []
             action_log_probs = []
-            for action_out in self.action_outs:
-                action_logit = action_out(x)
+            for i, action_out in enumerate(self.action_outs):
+                # ---------- ① list 要素を torch.Tensor に変換 ----------
+                mask_i = None
+                if available_actions is not None:
+                    arr_i = available_actions[i]                   # numpy or torch
+                    if isinstance(arr_i, np.ndarray):
+                        arr_i = torch.from_numpy(arr_i)
+                    mask_i = arr_i.to(x.device).type(torch.bool)   # bool マスクに統一
+
+                    # ---------- ② 行数( batch ) に expand --------------
+                    if mask_i.size(0) < x.size(0):           # ← 行数が足りないとき
+                        repeat = x.size(0) // mask_i.size(0)
+                        mask_i = mask_i.repeat(repeat, 1)    # 行方向にタイル
+
+                # ---------- ③ 通常どおり logits → sample -------------
+                action_logit = action_out(x, mask_i)
                 action = action_logit.mode() if deterministic else action_logit.sample()
                 action_log_prob = action_logit.log_probs(action)
+
                 actions.append(action)
                 action_log_probs.append(action_log_prob)
 
             actions = torch.cat(actions, -1)
             action_log_probs = torch.cat(action_log_probs, -1)
-        
+
         else:
-            action_logits = self.action_out(x)
+            # action_logits = self.action_out(x)
+            action_logits = self.action_out(x, available_actions)
             actions = action_logits.mode() if deterministic else action_logits.sample() 
             action_log_probs = action_logits.log_probs(actions)
         return actions, action_log_probs
@@ -90,12 +106,19 @@ class ACTLayer(nn.Module):
 
         :return action_probs: (torch.Tensor)
         """
-        if self.mixed_action or self.multi_discrete:
+        if self.mixed_action:
             action_probs = []
             for action_out in self.action_outs:
                 action_logit = action_out(x)
                 action_prob = action_logit.probs
                 action_probs.append(action_prob)
+            action_probs = torch.cat(action_probs, -1)
+        elif self.multi_discrete:
+            action_probs = []
+            for i, action_out in enumerate(self.action_outs):
+                mask_i = None if available_actions is None else available_actions[i]  # (batch, n_i)
+                action_logit = action_out(x, mask_i)          # ← マスクを適用
+                action_probs.append(action_logit.probs)
             action_probs = torch.cat(action_probs, -1)
         else:
             action_logits = self.action_out(x, available_actions)
@@ -139,8 +162,11 @@ class ACTLayer(nn.Module):
             action = torch.transpose(action, 0, 1)
             action_log_probs = []
             dist_entropy = []
-            for action_out, act in zip(self.action_outs, action):
-                action_logit = action_out(x)
+            # for action_out, act in zip(self.action_outs, action):
+            #     action_logit = action_out(x)
+            for i, (action_out, act) in enumerate(zip(self.action_outs, action)):
+                mask_i = None if available_actions is None else available_actions[i]
+                action_logit = action_out(x, mask_i)
                 action_log_probs.append(action_logit.log_probs(act))
                 if active_masks is not None:
                     dist_entropy.append((action_logit.entropy()*active_masks.squeeze(-1)).sum()/active_masks.sum())
@@ -151,7 +177,8 @@ class ACTLayer(nn.Module):
             dist_entropy = sum(dist_entropy)/len(dist_entropy)
 
         else:
-            action_logits = self.action_out(x)
+            # action_logits = self.action_out(x)
+            action_logits = self.action_out(x, available_actions)
             action_log_probs = action_logits.log_probs(action)
             if active_masks is not None:
                 dist_entropy = (action_logits.entropy()*active_masks.squeeze(-1)).sum()/active_masks.sum()

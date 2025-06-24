@@ -165,4 +165,3 @@ class Topk_Graph(nn.Module):
     def output_size(self):
         output_size = self.hidden_size
         return output_size
-        # return self.hidden_size

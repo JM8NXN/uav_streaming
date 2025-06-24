@@ -35,6 +35,8 @@ class R_MAPPOPolicy:
                                                  lr=self.critic_lr,
                                                  eps=self.opti_eps,
                                                  weight_decay=self.weight_decay)
+        
+        print(f"act_space, type(act_space):{act_space} {type(act_space)}") 
 
     def lr_decay(self, episode, episodes):
         """

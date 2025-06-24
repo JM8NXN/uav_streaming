@@ -164,18 +164,12 @@ def worker(remote, parent_remote, env_fn_wrapper):
             else:
                 if np.all(done) and data == 'ctl':
                     env.reset()
-        elif cmd == 'get_stats':
-            stats = env.get_stats()
-            remote.send(stats)
         elif cmd == 'render':
             if data == "rgb_array":
                 fr = env.render(mode=data)
                 remote.send(fr)
             elif data == "human":
                 env.render(mode=data)
-        elif cmd == 'change_env':
-            env.change_env()
-            remote.send(None)
         elif cmd == 'reset_task':
             ob = env.reset_task()
             remote.send(ob)
@@ -283,32 +277,49 @@ class SubprocVecEnv(ShareVecEnv):
     def step_wait(self):
         #[remote.recv() for remote in self.remotes]
         self.waiting = False
-    
+        
     def get_data(self, mode):
+        # 各サブプロセスに get_data を投げる
         for remote in self.remotes:
             remote.send(('get_data', mode))
         results = [remote.recv() for remote in self.remotes]
         obs, rews, dones, infos = zip(*results)
-        return np.stack(obs), np.stack(rews), np.stack(dones), infos
-    
-    def get_stats(self):
-        # サブプロセスへコマンドを投げる
-        for remote in self.remotes:
-            remote.send(('get_stats', None))
-        stats_list = [remote.recv() for remote in self.remotes]  # list[dict]
 
-        # ここでキーごと平均して一つの dict にまとめて返す
-        agg = {}
-        for k in stats_list[0].keys():
-            arrs = [np.array(s[k]).flatten() for s in stats_list]
-            agg[k] = float(np.mean(np.concatenate(arrs)))
-        return agg
-    
-    def change_env(self):
-        for remote in self.remotes:
-            remote.send(('change_env', None))
-        for remote in self.remotes:    # sync
-            remote.recv()    
+        # ctl モード：辞書型のままスタック
+        if mode == 'ctl':
+            # obs は tuple of object-arrays, each shape=(ctl_agents,) dtype=object
+            obs_out = np.stack(obs, axis=0)  # shape = (n_threads, ctl_agents)
+        
+        # exe モード：dict-of-array か ndarray-of-array を両対応
+        elif mode == 'exe':
+            first = obs[0]
+            # dict-of-array (object dtype) の場合
+            if isinstance(first, np.ndarray) and first.dtype == object:
+                n_threads = len(obs)
+                n_agents  = len(first)  # obs[0] が object-array of dict, 長さ＝agents
+                obs_out = np.empty(n_threads, dtype=object)
+                for e in range(n_threads):
+                    per_thread = {}
+                    # obs[e] は object-array, 各要素が dict
+                    for key in obs[e][0].keys():
+                        # 各 agent の obs[e][a][key] を集める
+                        per_thread[key] = np.stack(
+                            [obs[e][a][key] for a in range(n_agents)],
+                            axis=0
+                        )  # shape = (n_agents, *feature_shape)
+                    obs_out[e] = per_thread
+
+            # ndarray-of-array (flatten した Box 観測) の場合
+            else:
+                # obs は tuple of ndarrays, each shape=(n_agents, feat_dim)
+                # → stack して shape=(n_threads, n_agents, feat_dim) に
+                obs_out = np.stack(obs, axis=0)
+
+        else:
+            raise ValueError(f"Unknown mode passed to get_data: {mode}")
+
+        # 最後にまとめて返す
+        return obs_out, np.stack(rews), np.stack(dones), infos
 
     def get_avail_actions(self, mode):
         self.remotes[0].send(('get_avail_actions', mode))

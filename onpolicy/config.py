@@ -265,6 +265,9 @@ def get_config():
     # run parameters
     parser.add_argument("--use_linear_lr_decay", action='store_true',
                         default=False, help='use a linear schedule on the learning rate')
+    parser.add_argument("--hovering_phase_episodes", type=int, default=20000,
+                        help='number of episodes to change env (default: )')
+    
     # save parameters
     parser.add_argument("--save_interval", type=int, default=1, help="time duration between contiunous twice models saving.")
 

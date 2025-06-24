@@ -164,18 +164,12 @@ def worker(remote, parent_remote, env_fn_wrapper):
             else:
                 if np.all(done) and data == 'ctl':
                     env.reset()
-        elif cmd == 'get_stats':
-            stats = env.get_stats()
-            remote.send(stats)
         elif cmd == 'render':
             if data == "rgb_array":
                 fr = env.render(mode=data)
                 remote.send(fr)
             elif data == "human":
                 env.render(mode=data)
-        elif cmd == 'change_env':
-            env.change_env()
-            remote.send(None)
         elif cmd == 'reset_task':
             ob = env.reset_task()
             remote.send(ob)
@@ -290,25 +284,6 @@ class SubprocVecEnv(ShareVecEnv):
         results = [remote.recv() for remote in self.remotes]
         obs, rews, dones, infos = zip(*results)
         return np.stack(obs), np.stack(rews), np.stack(dones), infos
-    
-    def get_stats(self):
-        # サブプロセスへコマンドを投げる
-        for remote in self.remotes:
-            remote.send(('get_stats', None))
-        stats_list = [remote.recv() for remote in self.remotes]  # list[dict]
-
-        # ここでキーごと平均して一つの dict にまとめて返す
-        agg = {}
-        for k in stats_list[0].keys():
-            arrs = [np.array(s[k]).flatten() for s in stats_list]
-            agg[k] = float(np.mean(np.concatenate(arrs)))
-        return agg
-    
-    def change_env(self):
-        for remote in self.remotes:
-            remote.send(('change_env', None))
-        for remote in self.remotes:    # sync
-            remote.recv()    
 
     def get_avail_actions(self, mode):
         self.remotes[0].send(('get_avail_actions', mode))

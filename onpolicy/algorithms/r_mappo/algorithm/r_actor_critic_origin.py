@@ -31,6 +31,7 @@ class R_Actor(nn.Module):
         self._recurrent_N = args.recurrent_N
         self.use_macro = use_macro
         self.tpdv = dict(dtype=torch.float32, device=device)
+
         obs_shape = get_shape_from_obs_space(obs_space)
         if 'Dict' in obs_shape.__class__.__name__:
             self._mixed_obs = True
@@ -46,8 +47,7 @@ class R_Actor(nn.Module):
         self.input_size = self.base.output_size
 
         if (self._use_naive_recurrent_policy or self._use_recurrent_policy) and (not self.use_macro):
-            self.rnn = RNNLayer(self.input_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
-            # self.rnn = RNNLayer(self.hidden_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
+            self.rnn = RNNLayer(self.hidden_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
             self.input_size = self.hidden_size
 
         self.act = ACTLayer(action_space, self.input_size, self._use_orthogonal, self._gain)
@@ -74,28 +74,16 @@ class R_Actor(nn.Module):
             obs = check(obs).to(**self.tpdv)
         rnn_states = check(rnn_states).to(**self.tpdv)
         masks = check(masks).to(**self.tpdv)
-        # if available_actions is not None:
-        #     available_actions = check(available_actions).to(**self.tpdv)
         if available_actions is not None:
-            # MultiDiscrete のときは list、Discrete のときは ndarray/Tensor
-            if isinstance(available_actions, list):
-                available_actions = [check(a).to(**self.tpdv) for a in available_actions]
-            else:
-                available_actions = check(available_actions).to(**self.tpdv)
-
+            available_actions = check(available_actions).to(**self.tpdv)
 
         actor_features = self.base(obs)
-        # print("actor_features:", actor_features.shape)
-        
 
 
 
         if (self._use_naive_recurrent_policy or self._use_recurrent_policy) and (not self.use_macro):
             actor_features, rnn_states = self.rnn(actor_features, rnn_states, masks)
 
-        # print("actor_features.shape:", actor_features.shape)
-        # print("self.input_size:", self.input_size)
-        # # print("action_out weight shape:", self.act.action_out.fc_mean.weight.shape)        
         actions, action_log_probs = self.act(actor_features, available_actions, deterministic)
 
         return actions, action_log_probs, rnn_states
@@ -122,14 +110,8 @@ class R_Actor(nn.Module):
         rnn_states = check(rnn_states).to(**self.tpdv)
         action = check(action).to(**self.tpdv)
         masks = check(masks).to(**self.tpdv)
-        # if available_actions is not None:
-        #     available_actions = check(available_actions).to(**self.tpdv)
         if available_actions is not None:
-            # MultiDiscrete のときは list、Discrete のときは ndarray/Tensor
-            if isinstance(available_actions, list):
-                available_actions = [check(a).to(**self.tpdv) for a in available_actions]
-            else:
-                available_actions = check(available_actions).to(**self.tpdv)
+            available_actions = check(available_actions).to(**self.tpdv)
 
         if active_masks is not None:
             active_masks = check(active_masks).to(**self.tpdv)
@@ -183,8 +165,7 @@ class R_Critic(nn.Module):
         self.input_size = self.base.output_size
 
         if (self._use_naive_recurrent_policy or self._use_recurrent_policy) and (not self.use_macro):
-            self.rnn = RNNLayer(self.input_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
-            # self.rnn = RNNLayer(self.hidden_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
+            self.rnn = RNNLayer(self.hidden_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
             self.input_size = self.hidden_size
         def init_(m):
             return init(m, init_method, lambda x: nn.init.constant_(x, 0))

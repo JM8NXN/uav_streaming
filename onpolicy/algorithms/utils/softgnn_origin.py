@@ -217,57 +217,32 @@ class Perception_Graph(torch.nn.Module):
         super(Perception_Graph, self).__init__()       
         self.num_agents = num_agents
         feature_dim = 32
-        self.feature_dim = feature_dim
         layers = [32, 64, 128, 256]
         gnn_layers = 3 * ['self', 'cross']
-        self.per_agent_dim = 32
-        self.node_init = MLP([3] + layers + [feature_dim])
+        self.node_init = MLP([2] + layers + [feature_dim])
         nn.init.constant_(self.node_init[-1].bias, 0.0)
-        edge1_in_dim = 2 # distance + angle
-        self.edge1_init = MLP([edge1_in_dim, feature_dim, feature_dim])
-        nn.init.constant_(self.edge1_init[-1].bias, 0.0)
-        edge2_in_dim = 1 # distance
-        self.edge2_init = MLP([edge2_in_dim, feature_dim, feature_dim])
-        nn.init.constant_(self.edge2_init[-1].bias, 0.0)        
-        self.merge = MLP([feature_dim, feature_dim, self.per_agent_dim])
-        self.gnn_p2u = AttentionalGNN(feature_dim, gnn_layers)
-        self.gnn_u2u = AttentionalGNN(feature_dim, gnn_layers)
+        self.dis_init = MLP([1, feature_dim, feature_dim])
+        self.merge = MLP([feature_dim, feature_dim, 1])
+        nn.init.constant_(self.dis_init[-1].bias, 0.0)
+        self.gnn = AttentionalGNN(feature_dim, gnn_layers)
         
     def forward(self, observations): 
         #landmark position
         #agent position
         #distance from agent to landmark
-        rel_u2u_shape = observations['rel_dis_u2u'].shape
-        pilot_pos = self.node_init(observations['pilot_pos'].transpose(1,2))
+        rel_shape = observations['rel_dis'].shape
+        land_pos = self.node_init(observations['land_pos'].transpose(1,2))
         agent_pos = self.node_init(observations['agent_pos'].transpose(1,2))
-        uav_uav_dis = self.edge2_init(observations['rel_dis_u2u'].reshape(rel_u2u_shape[0], -1, rel_u2u_shape[-1]).transpose(1,2))\
-        .reshape(rel_u2u_shape[0], -1, rel_u2u_shape[1], rel_u2u_shape[2])
+        land_agent_dis = self.dis_init(observations['rel_dis'].reshape(rel_shape[0], -1, rel_shape[-1]).transpose(1,2))\
+        .reshape(rel_shape[0], -1, rel_shape[1], rel_shape[2])
 
-        edge_raw = torch.cat(
-            [observations['rel_dis_p2u'],     # (B, F, A, 1)
-            observations['rel_ang']],    # (B, F, A, 1)
-            dim=-1)                       # → (B, F, A, 2)
-        
-        B, F, A, C = edge_raw.shape
-
-        edge1_emb = self.edge1_init(
-            edge_raw.reshape(B, -1, C)    # (B, F*A, 2)
-                    .transpose(1, 2))     # (B, 2,   F*A)
-        
-        edge1_emb = edge1_emb.reshape(B, -1, F, A)  # (B, 32, N_pilot, N_agent)
-
-        edge1 = self.gnn_p2u(pilot_pos, agent_pos, edge1_emb)
-        # edge = self.merge(edge).reshape(rel_shape[0], -1)
-        edge2 = self.gnn_u2u(edge1, edge1, uav_uav_dis)
-        edge2 = self.merge(edge2)  # shape = [batch, 32]
-        out = edge2.mean(dim=-1)
-
-        return out
+        edge = self.gnn(land_pos, agent_pos, land_agent_dis)
+        edge = self.merge(edge).reshape(rel_shape[0], -1)
+        return edge
     
     @property
     def output_size(self):
-        return self.feature_dim
-        # return self.per_agent_dim * self.num_agents
+        return self.num_agents
 
 class LinearAssignment(nn.Module):
     def __init__(self, num_agents, device):

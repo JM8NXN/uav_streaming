@@ -1,0 +1,58 @@
+diff --git a/onpolicy/envs/uav/env.py b/onpolicy/envs/uav/env.py
+index 0000000..1111111 100644
+--- a/onpolicy/envs/uav/env.py
++++ b/onpolicy/envs/uav/env.py
+@@     def get_data(self, mode):
+-        obs_n = []
+-        reward_n = []
+-        done_n = []
+-        info_n = []
+-        if mode == 'ctl':
+-            for agent_idx in range(self.n_ctls):
+-                obs_n.append(self._get_obs_agent(agent_idx, mode))
+-                reward_n.append([self._get_reward(agent_idx, mode)])
+-                done_n.append(self._get_done())
+-        elif mode == 'exe':
+-            for agent_idx in range(self.n_exes):
+-                obs_n.append(self._get_obs_agent(agent_idx, mode))
+-                reward_n.append([self._get_reward(agent_idx, mode)])
+-                done_n.append(self._get_done())
+-
+-        # all agents get total reward in cooperative case...
+-        reward = np.sum(reward_n)
+-        if self.shared_reward:
+-            reward_n = [[reward]] * (self.ctl_num_agents + self.exe_num_agents)
+-
+-        return obs_n, reward_n, done_n, info_n
++        # 1) まず従来通り「エージェントごとの観測辞書リスト」を作る
++        obs_n = []
++        reward_n = []
++        done_n = []
++        info_n = []
++        if mode == 'ctl':
++            for agent_idx in range(self.n_ctls):
++                obs_n.append(self._get_obs_agent(agent_idx, mode))
++                reward_n.append([self._get_reward(agent_idx, mode)])
++                done_n.append(self._get_done())
++        elif mode == 'exe':
++            for agent_idx in range(self.n_exes):
++                obs_n.append(self._get_obs_agent(agent_idx, mode))
++                reward_n.append([self._get_reward(agent_idx, mode)])
++                done_n.append(self._get_done())
++
++        # 2) 協同報酬なら全員同じ総和を配る
++        reward = np.sum(reward_n)
++        if self.shared_reward:
++            reward_n = [[reward]] * (len(obs_n))
++
++        # ─────────────────────────────────────────────────────────
++        # 3) ここで「リスト of dict」→「dict of (batch × ...) array」へ変換
++        if isinstance(obs_n, list) and obs_n and isinstance(obs_n[0], dict):
++            batched = {}
++            for key in obs_n[0].keys():
++                # 各エージェント o[key] を axis=0 で積み上げ
++                batched[key] = np.stack([ o[key] for o in obs_n ], axis=0)
++            obs_n = batched
++        # ─────────────────────────────────────────────────────────
++
++        return obs_n, reward_n, done_n, info_n

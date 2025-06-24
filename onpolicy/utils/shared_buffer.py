@@ -84,7 +84,7 @@ class SharedReplayBuffer(object):
             self.available_actions = None
 
         act_shape = get_shape_from_act_space(act_space)
-
+        print(f"act_shape: {act_shape}")
         self.actions = np.zeros(
             (self.episode_length, self.n_rollout_threads, num_agents, act_shape), dtype=np.float32)
         self.action_log_probs = np.zeros(
@@ -138,6 +138,8 @@ class SharedReplayBuffer(object):
             self.available_actions[self.step + 1] = available_actions.copy()
 
         self.step = (self.step + 1) % self.episode_length
+        self.filled = (self.step == 0)
+
 
     def chooseinsert(self, share_obs, obs, rnn_states, rnn_states_critic, actions, action_log_probs,
                      value_preds, rewards, masks, bad_masks=None, active_masks=None, available_actions=None):
@@ -776,3 +778,34 @@ class SharedReplayBuffer(object):
             yield share_obs_batch, obs_batch, rnn_states_batch, rnn_states_critic_batch, actions_batch,\
                   value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch,\
                   adv_targ, available_actions_batch
+
+    def reset_storage(self):
+        """バッファ内容をゼロクリアし、step を 0 に戻す。"""
+        zero_attrs = ['share_obs','obs','rnn_states','rnn_states_critic',
+                    'actions','action_log_probs','value_preds','returns',
+                    'rewards','bad_masks']
+        one_attrs  = ['masks']                           # 初期マスクだけ 1
+
+        for attr in zero_attrs:
+            _recursive_fill(getattr(self, attr), 0.0)
+
+        for attr in one_attrs:
+            _recursive_fill(getattr(self, attr), 1.0)
+
+        if self.available_actions is not None:
+            _recursive_fill(self.available_actions, 1.0)
+
+        self.step = 0       
+
+def _recursive_fill(target, value):
+    """
+    target が ndarray ならその場で fill(value)。
+    dict なら value に対して再帰。
+    """
+    if isinstance(target, np.ndarray):
+        target.fill(value)
+    elif isinstance(target, dict):
+        for v in target.values():
+            _recursive_fill(v, value)
+    else:
+        raise TypeError(f'unknown type in reset_storage: {type(target)}')
